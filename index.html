@@ -1,0 +1,1737 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>E611會議室預約系統</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+    <style>
+      /* 設定主要字體和文創風格配色 */
+      @import url("https://fonts.googleapis.com/css2?family=Inter:wght@100..900&family=Noto+Sans+TC:wght@300;400;700&display=swap");
+      :root {
+        --color-primary: #fafaf9; /* 柔和的米白背景 (Stone-50) */
+        --color-accent: #fbbf24; /* 溫暖的淡橘色/暖黃色 (Amber-500) */
+        --color-secondary: #0ea5e9; /* 溫和的教育藍色 (Sky-500) */
+        --color-text: #44403c; /* 暖灰黑文字 (Stone-700) */
+        --color-card: #ffffff; /* 純白色卡片 */
+        --color-booking-bg: #e0f2f1; /* 柔和的淺綠色背景 (Teal-50) */
+        --color-booking-text: #0f766e; /* 沉穩的深綠色文字 (Teal-700) */
+      }
+      body {
+        font-family: "Noto Sans TC", "Inter", sans-serif;
+        background-color: var(--color-primary);
+        color: var(--color-text);
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+      .container {
+        max-width: 1200px;
+      }
+      .card {
+        background-color: var(--color-card);
+        /* 側邊框改用溫和的 Accent 色 */
+        border-left: 5px solid var(--color-accent);
+        transition: transform 0.2s, box-shadow 0.2s;
+        border-radius: 1rem; /* 更大的圓角，增加柔和感 */
+      }
+      .card:hover {
+        transform: translateY(-3px);
+        /* 陰影使用柔和的 Accent 色光暈 */
+        box-shadow: 0 15px 25px -5px rgba(251, 191, 36, 0.2),
+          0 5px 10px -5px rgba(251, 191, 36, 0.1);
+      }
+      .btn-primary {
+        /* 主要按鈕改用教育藍色 */
+        background-color: var(--color-secondary);
+        color: #ffffff;
+        font-weight: 600;
+        transition: background-color 0.2s;
+        border-radius: 0.75rem;
+      }
+      .btn-primary:hover {
+        background-color: #0c82bf; /* 稍微深一點的藍色 */
+      }
+      /* 輸入框焦點顏色使用 Accent 色 */
+      input:focus,
+      textarea:focus {
+        border-color: var(--color-accent) !important;
+        --tw-ring-color: #fcd34d !important; /* Amber-300 for soft ring */
+      }
+      /* 單選按鈕/勾選框的顏色使用 Accent 色 */
+      input[type="radio"]:focus,
+      input[type="checkbox"]:focus {
+        border-color: var(--color-accent) !important;
+        box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.2);
+      }
+      input[type="radio"]:checked,
+      input[type="checkbox"]:checked {
+        background-color: var(--color-accent);
+        border-color: var(--color-accent);
+      }
+      /* 調整強調色的類名 */
+      .text-accent {
+        color: var(--color-accent);
+      }
+      .border-accent {
+        border-color: var(--color-accent);
+      }
+
+      /* 日曆格子樣式調整 */
+      .calendar-day {
+        min-height: auto;
+        padding-bottom: 0.5rem;
+        transition: background-color 0.1s;
+      }
+      .calendar-day.booked {
+        background-color: var(--color-booking-bg);
+        border-color: var(--color-booking-text) !important;
+        cursor: pointer;
+      }
+      .calendar-day.booked:hover {
+        background-color: #a7f3d0;
+      }
+      /* 確保日曆格子內容可以滾動 */
+      .booking-list-container {
+        max-height: 120px;
+        overflow-y: auto;
+        scrollbar-width: thin;
+        scrollbar-color: var(--color-booking-text) transparent;
+      }
+      .booking-list-container::-webkit-scrollbar {
+        width: 4px;
+      }
+      .booking-list-container::-webkit-scrollbar-thumb {
+        background-color: var(--color-booking-text);
+        border-radius: 2px;
+      }
+
+      /* 新增 Tab 樣式 */
+      .tab-button {
+        @apply p-4 text-center cursor-pointer font-semibold border-b-2 transition-colors duration-200;
+      }
+      .tab-button.active {
+        border-color: var(--color-accent);
+        color: var(--color-accent);
+      }
+      .tab-button:not(.active):hover {
+        color: var(--color-text);
+        border-color: #e7e5e4;
+      }
+    </style>
+    <script type="module">
+      import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+      import {
+        getFirestore,
+        collection,
+        query,
+        onSnapshot,
+        doc,
+        setDoc,
+        addDoc,
+        updateDoc,
+        deleteDoc,
+        orderBy,
+      } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+      import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+      setLogLevel("Debug");
+
+      // 【已移除 EmailJS 配置】
+
+      // 全域變數初始化
+      let db;
+      let auth = null;
+      let currentUserId = "public-user"; // 這裡的 ID 用來讓用戶可以刪除自己建立的預約
+      let appId = "default-app-id";
+      let isAuthReady = true;
+      let isAdminLoggedIn = false;
+
+      const ROOM_BOOKINGS_COLLECTION = "room_bookings";
+      const CONFIG_DOC_ID = "E611_settings";
+      const ANNOUNCEMENT_DOC_ID = "E611_announcement";
+      let allowedSlots = { slots: [], startDate: null, endDate: null };
+
+      // --- Calendar State ---
+      let currentDisplayDate = new Date();
+      let globalApprovedBookings = [];
+      let currentAnnouncement = "載入中，請稍候...";
+
+      // **Tab 狀態 (儲存權限)**
+      let currentTab = "schedule";
+
+      // 【優化 1】修正後的輔助函式：取得最接近的下一段半小時時間 (YYYY-MM-DDTHH:MM)
+      const getNextHalfHour = (date) => {
+        let newDate = new Date(date.getTime()); // 複製避免修改原物件
+        const minutes = newDate.getMinutes();
+
+        if (minutes < 30) {
+          newDate.setMinutes(30, 0, 0);
+        } else {
+          // 分鐘 >= 30，進位到下一小時的 00 分
+          newDate.setHours(newDate.getHours() + 1, 0, 0, 0);
+        }
+
+        // 返回您定義的本地時間 ISO 格式
+        return toLocalISOStringWithoutZ(newDate);
+      };
+
+      // **輔助函式：自定義本地時間 ISO 格式 (YYYY-MM-DDTHH:MM)**
+      const toLocalISOStringWithoutZ = (date) => {
+        const pad = (num) => String(num).padStart(2, "0");
+        return (
+          date.getFullYear() +
+          "-" +
+          pad(date.getMonth() + 1) +
+          "-" +
+          pad(date.getDate()) +
+          "T" +
+          pad(date.getHours()) +
+          ":" +
+          pad(date.getMinutes())
+        );
+      };
+
+      // --- 修正後的輔助函式：檢查時間衝突 (功能一) ---
+      const checkConflict = (newStartTimeISO, newEndTimeISO) => {
+        // 檢查新時間段是否有效
+        if (newStartTimeISO >= newEndTimeISO)
+          return { isConflict: true, message: "時間順序無效" };
+
+        for (const existingBooking of globalApprovedBookings) {
+          const existingStartISO = existingBooking.startTime;
+          const existingEndISO = existingBooking.endTime;
+
+          // 衝突邏輯 (字串比較)：
+          if (newStartTimeISO >= existingEndISO) {
+            continue;
+          }
+          if (newEndTimeISO <= existingStartISO) {
+            continue;
+          }
+
+          // 排除以上兩種情況，即發生衝突：
+          console.log("Conflict detected with booking:", existingBooking.id);
+
+          const conflictStart =
+            newStartTimeISO > existingStartISO
+              ? newStartTimeISO
+              : existingStartISO;
+          const conflictEnd =
+            newEndTimeISO < existingEndISO ? newEndTimeISO : existingEndISO;
+
+          // 返回衝突的詳細信息
+          return {
+            isConflict: true,
+            conflictDate: conflictStart.split("T")[0],
+            conflictStart: conflictStart.split("T").pop().substring(0, 5),
+            conflictEnd: conflictEnd.split("T").pop().substring(0, 5),
+          };
+        }
+        return { isConflict: false }; // 無衝突，返回物件
+      };
+      // ------------------------------------
+
+      // Firebase Setup (保持不變)
+      const initializeFirebase = () => {
+        let firebaseConfig = {};
+        let useFallback = false;
+
+        try {
+          if (typeof __firebase_config !== "undefined" && __firebase_config) {
+            firebaseConfig = JSON.parse(__firebase_config);
+            appId =
+              typeof __app_id !== "undefined" ? __app_id : "default-app-id";
+          } else {
+            useFallback = true;
+          }
+        } catch (e) {
+          console.error("Failed to parse firebase config, using fallback:", e);
+          useFallback = true;
+        }
+
+        if (useFallback || Object.keys(firebaseConfig).length === 0) {
+          console.warn(
+            "Using hardcoded Firebase config for external environment. AUTH IS DISABLED."
+          );
+          // 這是您專案的真實配置
+          firebaseConfig = {
+            apiKey: "AIzaSyCi7VBqQ2V3f-erbzpL4iphEakHVyyLxBU",
+            authDomain: "e611-20947.firebaseapp.com",
+            projectId: "e611-20947",
+            storageBucket: "e611-20947.firebasestorage.app",
+            messagingSenderId: "1061559204914",
+            appId: "1:1061559204914:web:7e9a8e8c7a86c864d3902b",
+          };
+          appId = firebaseConfig.projectId;
+        }
+
+        if (Object.keys(firebaseConfig).length > 0) {
+          try {
+            const app = initializeApp(firebaseConfig);
+            db = getFirestore(app);
+
+            // 檢查 URL 參數是否有帶 ID，如果沒有則生成一個 session/local storage ID
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.has("user_id")) {
+              currentUserId = urlParams.get("user_id");
+            } else {
+              let localUserId = localStorage.getItem("e611_user_id");
+              if (!localUserId) {
+                localUserId =
+                  "user-" + Math.random().toString(36).substring(2, 9);
+                localStorage.setItem("e611_user_id", localUserId);
+              }
+              currentUserId = localUserId;
+              // 可選：將頁面重定向到帶有 user_id 的 URL，以便於分享和維護狀態
+              // history.replaceState(null, '', `?user_id=${localUserId}`);
+            }
+          } catch (error) {
+            console.error("Firebase Initialization Failed:", error);
+          }
+        }
+      };
+
+      const setupAuthAndListeners = () => {
+        document.getElementById("user-id-display").textContent = currentUserId;
+        console.log("Auth Disabled. Public ID:", currentUserId);
+        setupRealtimeListeners();
+      };
+
+      // 【修正】取得公告文件參考
+      const getAnnouncementDocRef = () => {
+        if (!db || !appId) return null;
+        const configCollection = collection(
+          db,
+          `artifacts/${appId}/public/data/app_config`
+        );
+        return doc(configCollection, ANNOUNCEMENT_DOC_ID);
+      };
+
+      // 【修正】提交公共留言 (現在是公告)
+      window.submitPublicMessage = async () => {
+        const content = document
+          .getElementById("public-message-input")
+          .value.trim();
+        const messageStatus = document.getElementById("public-message-status");
+
+        if (!content) {
+          messageStatus.textContent = "❌ 請輸入公告內容。";
+          messageStatus.className = "text-red-600 mt-2";
+          return;
+        }
+
+        if (!db || !getAnnouncementDocRef()) {
+          messageStatus.textContent = "❌ 資料庫未準備好。";
+          messageStatus.className = "text-red-600 mt-2";
+          return;
+        }
+
+        try {
+          // 寫入單一文件，內容將覆蓋舊內容
+          await setDoc(getAnnouncementDocRef(), {
+            content: content,
+            userId: currentUserId,
+            timestamp: new Date().toISOString(),
+          });
+
+          document.getElementById("public-message-input").value = "";
+          messageStatus.textContent = "✅ 公告已成功發布。";
+          messageStatus.className = "text-green-600 mt-2";
+        } catch (error) {
+          console.error("Error saving announcement:", error);
+          messageStatus.textContent = "❌ 發布失敗。";
+          messageStatus.className = "text-red-600 mt-2";
+        }
+      };
+
+      // 【修正】渲染公告內容
+      const renderAnnouncement = () => {
+        const displayContainer = document.getElementById(
+          "public-announcement-display"
+        );
+        if (!displayContainer) return;
+
+        displayContainer.innerHTML = `
+            <p class="text-base font-bold text-red-900 whitespace-pre-wrap leading-relaxed">${currentAnnouncement}</p>
+        `;
+      };
+      // ------------------------------------------------------------------------
+
+      // --- Firestore Operations (Booking/Settings Logic remains the same) ---
+
+      const getBookingsCollectionRef = () => {
+        if (!db || !appId) return null;
+        return collection(
+          db,
+          `artifacts/${appId}/public/data/${ROOM_BOOKINGS_COLLECTION}`
+        );
+      };
+
+      const getSettingsDocRef = () => {
+        if (!db || !appId) return null;
+        const configCollection = collection(
+          db,
+          `artifacts/${appId}/public/data/app_config`
+        );
+        return doc(configCollection, CONFIG_DOC_ID);
+      };
+
+      const isTimeSlotAllowed = (startTimeISO, endTimeISO) => {
+        const config = allowedSlots;
+        const requestedDate = startTimeISO.split("T")[0];
+
+        if (config.startDate && requestedDate < config.startDate) return false;
+        if (config.endDate && requestedDate > config.endDate) return false;
+
+        if (config.slots.length === 0) return true;
+
+        const getHourMinute = (iso) => {
+          try {
+            // 從 YYYY-MM-DDTHH:MM 中取得 HH:MM
+            return iso.includes("T")
+              ? iso.split("T")[1].substring(0, 5)
+              : "00:00";
+          } catch {
+            return "00:00";
+          }
+        };
+
+        const requestedStartTime = getHourMinute(startTimeISO);
+        const requestedEndTime = getHourMinute(endTimeISO);
+
+        for (const slot of config.slots) {
+          if (
+            requestedStartTime >= slot.start &&
+            requestedEndTime <= slot.end &&
+            requestedStartTime < requestedEndTime
+          ) {
+            return true;
+          }
+        }
+        return false;
+      };
+
+      // **週期計算邏輯** (保持不變)
+      const calculateRecurringDates = (start, end, endType, endValue) => {
+        const bookings = [];
+        let currentStart = new Date(start);
+        let currentEnd = new Date(end);
+
+        if (currentStart.getTime() >= currentEnd.getTime()) return bookings;
+
+        const startLocalISO = toLocalISOStringWithoutZ(currentStart);
+        const endLocalISO = toLocalISOStringWithoutZ(currentEnd);
+
+        // 檢查第一筆預約是否允許
+        if (!isTimeSlotAllowed(startLocalISO, endLocalISO)) {
+          return bookings;
+        }
+
+        // 儲存第一筆預約，使用本地時間格式
+        bookings.push({
+          start: startLocalISO,
+          end: endLocalISO,
+        });
+
+        let count = 1;
+
+        while (true) {
+          let nextStart = new Date(currentStart);
+          let nextEnd = new Date(currentEnd);
+
+          // 設置為下一週
+          nextStart.setDate(currentStart.getDate() + 7);
+          nextEnd.setDate(currentEnd.getDate() + 7);
+
+          if (endType === "endDate") {
+            const endDateLimit = new Date(endValue);
+            if (nextStart.getTime() > endDateLimit.getTime()) {
+              break;
+            }
+          } else if (endType === "count") {
+            count++;
+            if (count > parseInt(endValue)) {
+              break;
+            }
+          }
+
+          const nextStartLocalISO = toLocalISOStringWithoutZ(nextStart);
+          const nextEndLocalISO = toLocalISOStringWithoutZ(nextEnd);
+
+          // 檢查是否超出管理員設定的年度截止日期
+          if (
+            allowedSlots.endDate &&
+            nextStartLocalISO.split("T")[0] > allowedSlots.endDate
+          ) {
+            console.warn(
+              "Recurrence stopped because next date exceeds annual end date."
+            );
+            break;
+          }
+
+          if (bookings.length >= 52) {
+            // 安全限制
+            console.warn("Recurrence limit reached (52 weeks safety break).");
+            break;
+          }
+
+          if (isTimeSlotAllowed(nextStartLocalISO, nextEndLocalISO)) {
+            bookings.push({
+              start: nextStartLocalISO, // 儲存本地時間格式
+              end: nextEndLocalISO, // 儲存本地時間格式
+            });
+            currentStart = nextStart;
+            currentEnd = nextEnd;
+          } else {
+            console.warn(
+              `Recurrence stopped because slot at ${nextStartLocalISO} is not allowed by admin settings.`
+            );
+            break;
+          }
+        }
+
+        return bookings;
+      };
+
+      // --- 【核心變動】window.submitReservation 允許「口試」重疊 ---
+      window.submitReservation = async (event) => {
+        event.preventDefault();
+        const form = event.target;
+        const startTime = form.startTime.value;
+        const endTime = form.endTime.value;
+        const purpose = form.purpose.value; // 取得目的
+        const messageElement = document.getElementById("reservation-message");
+
+        // 只要目的是「口試」或「系會議/活動」，就允許重疊
+        const isOverlapAllowed =
+          purpose === "口試" || purpose === "系會議/活動";
+
+        if (!db || !getBookingsCollectionRef()) {
+          console.error("Database not ready.");
+          messageElement.textContent = "系統尚未準備好，請稍候再試。";
+          messageElement.className = "text-red-600 mt-2";
+          return;
+        }
+
+        if (new Date(startTime).getTime() >= new Date(endTime).getTime()) {
+          messageElement.textContent = "❌ 結束時間必須晚於開始時間。";
+          messageElement.className = "text-red-600 mt-2";
+          return;
+        }
+
+        const isRecurring = form.isRecurring.checked;
+
+        const baseBooking = {
+          name: form.name.value,
+          advisor: form.advisor.value,
+          purpose: purpose, // 使用已取得的 purpose
+          status: "Approved",
+          userId: currentUserId,
+        };
+
+        let bookingsToSubmit = [];
+
+        if (isRecurring) {
+          const endType = form.recurrenceEndType.value;
+          let endValue;
+
+          if (endType === "endDate") {
+            endValue = form.recurrenceEndDate.value;
+            if (
+              !endValue ||
+              new Date(endValue).getTime() < new Date(startTime).getTime()
+            ) {
+              messageElement.textContent =
+                "❌ 請選擇有效的週期結束日期 (需晚於開始日期)。";
+              messageElement.className = "text-red-600 mt-2";
+              return;
+            }
+          } else {
+            endValue = parseInt(form.recurrenceCount.value);
+            if (isNaN(endValue) || endValue < 1) {
+              messageElement.textContent = "❌ 重複次數至少需為 1 次。";
+              messageElement.className = "text-red-600 mt-2";
+              return;
+            }
+          }
+
+          const dates = calculateRecurringDates(
+            startTime,
+            endTime,
+            endType,
+            endValue
+          );
+
+          if (dates.length === 0) {
+            if (!isTimeSlotAllowed(startTime, endTime)) {
+              messageElement.textContent =
+                "❌ 預約時間不符合管理員設定的開放區段或年度範圍。";
+            } else {
+              messageElement.textContent =
+                "❌ 無效的週期設定，或週期中的預約日期超出年度範圍或開放時間。";
+            }
+            messageElement.className = "text-red-600 mt-2";
+            return;
+          }
+
+          // --- 週期性預約：衝突檢查 ---
+          if (!isOverlapAllowed) {
+            for (const date of dates) {
+              const conflictResult = checkConflict(date.start, date.end);
+              if (conflictResult.isConflict) {
+                messageElement.textContent = `❌ 週期預約失敗！${
+                  date.start.split("T")[0]
+                } 當天的時間段 (${conflictResult.conflictStart} ~ ${
+                  conflictResult.conflictEnd
+                }) 與現有核准預約時間重疊。請修改時間。`;
+                messageElement.className = "text-red-600 mt-2";
+                return;
+              }
+            }
+          }
+          // ------------------------------------
+
+          bookingsToSubmit = dates.map((date, index) => ({
+            ...baseBooking,
+            startTime: date.start,
+            endTime: date.end,
+            timestamp: new Date().toISOString(),
+            recurrenceNote: `週期預約: ${dates.length} 次中的第 ${
+              index + 1
+            } 次`,
+          }));
+        } else {
+          const localStartTime = startTime;
+          const localEndTime = endTime;
+
+          if (!isTimeSlotAllowed(localStartTime, localEndTime)) {
+            messageElement.textContent =
+              "❌ 預約時間不符合管理員設定的開放區段或年度範圍。";
+            messageElement.className = "text-red-600 mt-2";
+            return;
+          }
+
+          // --- 單次預約：衝突檢查 ---
+          if (!isOverlapAllowed) {
+            const conflictResult = checkConflict(localStartTime, localEndTime);
+            if (conflictResult.isConflict) {
+              messageElement.textContent = `❌ 預約時間 (${conflictResult.conflictStart} ~ ${conflictResult.conflictEnd}) 與現有已預約時間重疊，請修改時間。`;
+              messageElement.className = "text-red-600 mt-2";
+              return;
+            }
+          }
+          // --------------------------
+
+          bookingsToSubmit.push({
+            ...baseBooking,
+            startTime: localStartTime,
+            endTime: localEndTime,
+            timestamp: new Date().toISOString(),
+            recurrenceNote: "單次預約",
+          });
+        }
+
+        try {
+          const promises = bookingsToSubmit.map((booking) =>
+            addDoc(getBookingsCollectionRef(), booking)
+          );
+          await Promise.all(promises);
+
+          // 移除 Email 通知，直接顯示成功
+          let successMessage = `✅ 預約成功 (${bookingsToSubmit.length} 筆資料)！已立即排入日曆中。`;
+          if (isOverlapAllowed) {
+            successMessage += " (注意：此預約目的允許時間與現有預約重疊)";
+          }
+          messageElement.textContent = successMessage;
+
+          form.reset();
+          document.getElementById("recurrenceOptions").classList.add("hidden");
+          document
+            .getElementById("recurrenceEndType")
+            .dispatchEvent(new Event("change"));
+
+          const now = new Date();
+          document.getElementById("startTime").value = getNextHalfHour(
+            new Date(now)
+          );
+          document.getElementById("endTime").value = getNextHalfHour(
+            new Date(now.getTime() + 60 * 60 * 1000)
+          );
+
+          messageElement.className = "text-green-600 mt-2";
+        } catch (error) {
+          console.error("Error submitting reservation:", error);
+          const errorCode = error.code ? `(${error.code})` : "";
+          const rawMessage = error.message || "發生未知錯誤。";
+          const friendlyMessage = rawMessage.includes("] ")
+            ? rawMessage.split("] ")[1]
+            : rawMessage;
+
+          messageElement.textContent = `❌ 預約失敗 ${errorCode}：${friendlyMessage}`;
+          messageElement.className = "text-red-600 mt-2";
+        }
+      };
+      // -------------------------------------------------------------
+
+      // updateBookingStatus 函式保持簡化
+      window.updateBookingStatus = async (id, newStatus) => {
+        if (!isAuthReady || !getBookingsCollectionRef()) {
+          console.error("Database not ready.");
+          return;
+        }
+
+        const bookingRef = doc(getBookingsCollectionRef(), id);
+        try {
+          await updateDoc(bookingRef, { status: newStatus });
+          console.log(`Booking ${id} updated to ${newStatus}`);
+        } catch (error) {
+          console.error("Error updating status:", error);
+        }
+      };
+
+      // **刪除函數** (申請人/管理員皆可使用)
+      window.deleteBooking = async (id) => {
+        if (!isAuthReady || !getBookingsCollectionRef()) {
+          console.error("Database not ready.");
+          return;
+        }
+
+        if (!confirm("確定要刪除這筆預約嗎？此操作不可逆。")) {
+          return;
+        }
+
+        console.log("Attempting to delete/cancel booking:", id);
+
+        const bookingRef = doc(getBookingsCollectionRef(), id);
+        try {
+          await deleteDoc(bookingRef);
+          console.log(`Booking ${id} deleted.`);
+          alert("預約已成功刪除！日曆將自動更新。");
+        } catch (error) {
+          console.error("Error deleting booking:", error);
+          alert("刪除預約失敗，請檢查系統或網路連線。");
+        }
+      };
+
+      window.saveAllowedSlots = async () => {
+        if (!isAuthReady || !getSettingsDocRef()) {
+          console.error("Database not ready.");
+          return;
+        }
+
+        const input = document.getElementById("admin-slots-input").value.trim();
+        const startDate = document
+          .getElementById("admin-start-date")
+          .value.trim();
+        const endDate = document.getElementById("admin-end-date").value.trim();
+
+        let newSlots = [];
+        const adminMessage = document.getElementById("admin-message");
+
+        if (
+          !startDate ||
+          !endDate ||
+          new Date(startDate).getTime() >= new Date(endDate).getTime()
+        ) {
+          adminMessage.textContent =
+            "❌ 年度有效範圍錯誤：起始日期和截止日期皆為必填，且起始日期必須早於截止日期。";
+          adminMessage.className = "text-red-600 mt-2";
+          return;
+        }
+
+        if (input) {
+          try {
+            const slotStrings = input
+              .split(",")
+              .map((s) => s.trim())
+              .filter((s) => s.length > 0);
+
+            for (const s of slotStrings) {
+              const parts = s.split("-");
+              if (parts.length === 2) {
+                const start = parts[0].trim();
+                const end = parts[1].trim();
+
+                if (
+                  /^\d{2}:\d{2}$/.test(start) &&
+                  /^\d{2}:\d{2}$/.test(end) &&
+                  start < end
+                ) {
+                  newSlots.push({ start, end });
+                } else {
+                  throw new Error(`無效的時間格式或順序: ${s}`);
+                }
+              } else {
+                throw new Error(`無效的區段格式: ${s}`);
+              }
+            }
+          } catch (e) {
+            console.error("Invalid input format for slots:", e);
+            adminMessage.textContent = `❌ 每日開放區段格式錯誤: ${e.message}. 請使用 HH:MM-HH:MM, HH:MM-HH:MM 格式。`;
+            adminMessage.className = "text-red-600 mt-2";
+            return;
+          }
+        }
+
+        try {
+          await setDoc(
+            getSettingsDocRef(),
+            {
+              allowed_slots: newSlots,
+              validity_start_date: startDate,
+              validity_end_date: endDate,
+            },
+            { merge: true }
+          );
+          adminMessage.textContent =
+            "✅ 開放時間區段和年度範圍設定已成功儲存。";
+          adminMessage.className = "text-green-600 mt-2";
+        } catch (error) {
+          console.error("Error saving settings:", error);
+          adminMessage.textContent = "❌ 儲存設定失敗。";
+          adminMessage.className = "text-red-600 mt-2";
+        }
+      };
+
+      // **修正後的 setupRealtimeListeners 函數**
+      const setupRealtimeListeners = () => {
+        if (!db || !getBookingsCollectionRef()) return;
+
+        const allBookingsQuery = query(getBookingsCollectionRef());
+
+        const announcementRef = getAnnouncementDocRef();
+
+        onSnapshot(
+          allBookingsQuery,
+          (snapshot) => {
+            const allBookings = snapshot.docs.map((doc) => ({
+              id: doc.id,
+              ...doc.data(),
+            }));
+
+            // 只過濾 "Approved" 的預約，因為現在所有提交都是 Approved
+            const approvedBookings = allBookings
+              .filter((booking) => booking.status === "Approved")
+              .sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
+
+            globalApprovedBookings = approvedBookings;
+            renderCalendar();
+
+            renderReviewPanel([]); // 傳入空陣列，以清除舊的待審核內容
+          },
+          (error) => {
+            console.error("Error fetching bookings:", error);
+          }
+        );
+
+        const settingsRef = getSettingsDocRef();
+        if (settingsRef) {
+          onSnapshot(
+            settingsRef,
+            (doc) => {
+              if (doc.exists()) {
+                const data = doc.data();
+                allowedSlots.slots = data.allowed_slots || [];
+                allowedSlots.startDate = data.validity_start_date || null;
+                allowedSlots.endDate = data.validity_end_date || null;
+              } else {
+                allowedSlots = { slots: [], startDate: null, endDate: null };
+              }
+              renderAnnualScheduleInfo();
+
+              if (currentTab === "admin") {
+                renderAdminSettings();
+              }
+            },
+            (error) => {
+              console.error("Error fetching settings:", error);
+            }
+          );
+        }
+
+        // 【修正點】：公告文件的即時監聽
+        if (announcementRef) {
+          onSnapshot(
+            announcementRef,
+            (doc) => {
+              if (doc.exists() && doc.data().content) {
+                currentAnnouncement = doc.data().content;
+              } else {
+                currentAnnouncement = "歡迎使用 E611 會議室預約系統。";
+              }
+              renderAnnouncement(); // 渲染公告
+            },
+            (error) => {
+              console.error("Error fetching announcement:", error);
+              currentAnnouncement = "公告載入失敗。";
+              renderAnnouncement();
+            }
+          );
+        }
+      };
+
+      // 【新增函數】渲染年度排程資訊
+      const renderAnnualScheduleInfo = () => {
+        const container = document.getElementById("annual-schedule-info");
+        if (!container) return;
+
+        const { startDate, endDate, slots } = allowedSlots;
+        let htmlContent = "";
+
+        if (startDate && endDate) {
+          const slotsText =
+            slots.length > 0
+              ? slots.map((s) => `${s.start}~${s.end}`).join(", ")
+              : "無特定時段設定 (允許所有時段)";
+
+          htmlContent = `
+            <div class="flex items-center text-sm font-medium p-3 bg-blue-50/70 border-l-4 border-secondary text-stone-700 rounded-lg shadow-sm mb-4">
+              <i data-lucide="clock" class="w-4 h-4 mr-2 text-secondary"></i>
+              <span class="font-bold">年度有效範圍: </span>
+              <span class="ml-1">${startDate}</span>
+              <i data-lucide="arrow-right" class="w-3 h-3 mx-2"></i>
+              <span>${endDate}</span>
+              <span class="ml-4 font-bold">每日開放時段: </span>
+              <span class="ml-1">${slotsText}</span>
+            </div>
+          `;
+        } else {
+          htmlContent = `
+            <div class="flex items-center text-sm font-medium p-3 bg-red-50/70 border-l-4 border-red-500 text-stone-700 rounded-lg shadow-sm mb-4">
+              <i data-lucide="alert-triangle" class="w-4 h-4 mr-2 text-red-500"></i>
+              <span class="font-bold text-red-700">警告: </span>
+              <span class="ml-1">管理員尚未設定年度有效範圍 (預設允許所有時間，請謹慎預約)。</span>
+            </div>
+          `;
+        }
+
+        container.innerHTML = htmlContent;
+        lucide.createIcons();
+      };
+      // ------------------------------------------------------------------------
+
+      // **日期格式化函數**
+      const formatDateTime = (isoString) => {
+        if (!isoString) return "N/A";
+        try {
+          if (isoString.includes("T")) {
+            const [datePart, timePart] = isoString.split("T");
+            // 確保只顯示 YYYY/MM/DD HH:MM
+            return `${datePart.replace(/-/g, "/")} ${timePart.substring(0, 5)}`;
+          }
+          const date = new Date(isoString);
+          return date
+            .toLocaleString("zh-TW", {
+              year: "numeric",
+              month: "2-digit",
+              day: "2-digit",
+              hour: "2-digit",
+              minute: "2-digit",
+              hour12: false,
+            })
+            .replace(/\//g, "-")
+            .replace(",", " ");
+        } catch (e) {
+          console.error("Date formatting failed for:", isoString, e);
+          return isoString;
+        }
+      };
+
+      window.changeMonth = (delta) => {
+        currentDisplayDate.setDate(1);
+        currentDisplayDate.setMonth(currentDisplayDate.getMonth() + delta);
+        renderCalendar();
+      };
+
+      window.showBookingDetailsWithAdminCheck = (dateString) => {
+        renderDayDetails(dateString);
+
+        const adminSettingsContainer =
+          document.getElementById("admin-settings");
+        if (
+          currentTab === "admin" &&
+          adminSettingsContainer &&
+          adminSettingsContainer.innerHTML.includes("載入設定面板...")
+        ) {
+          renderAdminSettings();
+        }
+      };
+
+      // 顯示選定日期的預約詳情
+      // 由於移除了 studentId，這裡的顯示邏輯也需要調整
+      window.renderDayDetails = (dateString) => {
+        const detailContainer = document.getElementById("calendar-day-details");
+        const clickedDate = dateString.split("T")[0];
+
+        const dayBookings = globalApprovedBookings.filter((b) =>
+          b.startTime.startsWith(clickedDate)
+        );
+
+        // 檢查是否為管理員登入狀態
+        const isAdminMode = isAdminLoggedIn;
+        // 取得當前用戶 ID
+        const userId = currentUserId;
+
+        if (dayBookings.length === 0) {
+          detailContainer.innerHTML = `<div class="p-4 text-stone-500 bg-stone-50 rounded-lg text-center">本日沒有已通過的預約或預約已結束。</div>`;
+          return;
+        }
+
+        detailContainer.innerHTML = `
+          <h4 class="text-xl font-bold text-stone-700 mb-3">${clickedDate} 預約詳情 (${
+          dayBookings.length
+        } 筆)</h4>
+          ${dayBookings
+            .map((booking) => {
+              const startTime = formatDateTime(booking.startTime)
+                .split(" ")
+                .pop();
+              const endTime = formatDateTime(booking.endTime).split(" ").pop();
+              const isOverlapping = booking.purpose === "口試"; // 標記為口試預約
+
+              // 刪除按鈕邏輯：
+              const canDelete = isAdminMode || booking.userId === userId;
+
+              const deleteBtn = canDelete
+                ? `<button onclick="deleteBooking('${booking.id}')"
+                    class="text-xs bg-red-500 hover:bg-red-600 text-white py-1 px-3 rounded-md transition duration-150 shadow-sm ml-2">
+                    取消/刪除
+                  </button>`
+                : "";
+
+              // 移除對 studentId 的依賴
+              const userInfo = booking.name
+                ? `預約人: ${booking.name}`
+                : `預約人 ID: ${booking.userId}`;
+
+              const overlapWarning = isOverlapping
+                ? `<p class="text-xs text-blue-900 mt-1 font-bold bg-blue-50 px-2 py-0.5 rounded-full inline-block">● 優先權: 口試專用時段</p>`
+                : booking.purpose === "系會議/活動"
+                ? `<p class="text-xs text-red-900 mt-1 font-bold bg-red-50 px-2 py-0.5 rounded-full inline-block">● 優先權: 系務活動時段</p>`
+                : "";
+
+              return `
+            <div class="p-3 mb-2 bg-white rounded-lg border border-stone-200 shadow-sm text-sm">
+              <div class="flex justify-between items-center">
+                <p class="font-semibold text-accent">${startTime} - ${endTime}</p>
+                ${deleteBtn}
+              </div>
+              <p class="text-stone-600 truncate mt-1">目的: ${
+                booking.purpose
+              }</p>
+              <p class="text-stone-500 text-xs mt-1">${userInfo}</p>
+              <p class="text-stone-500 text-xs mt-0.5">指導教授: ${
+                booking.advisor
+              }</p>
+              ${overlapWarning}
+              ${
+                booking.recurrenceNote && !isOverlapping
+                  ? `<p class="text-xs text-accent mt-1 font-semibold">${booking.recurrenceNote}</p>`
+                  : ""
+              }
+            </div>
+          `;
+            })
+            .join("")}
+        `;
+        lucide.createIcons();
+      };
+      // -------------------------------------------------------------
+
+      // 核心函數：渲染日曆 (修正 2: 口試預約顯示寶藍色)
+      const renderCalendar = () => {
+        const container = document.getElementById("approved-schedule");
+        if (!container) return;
+
+        const year = currentDisplayDate.getFullYear();
+        const month = currentDisplayDate.getMonth();
+        const monthName = currentDisplayDate.toLocaleString("zh-TW", {
+          month: "long",
+          year: "numeric",
+        });
+
+        const firstDayOfMonth = new Date(year, month, 1).getDay();
+        const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+        const calendarGrid = [];
+        // ✅ 職人級寫法：精準獲取本地時區日期
+        const todayDate = new Intl.DateTimeFormat("fr-CA", {
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+        }).format(new Date());
+
+        const bookedDatesMap = globalApprovedBookings.reduce((acc, booking) => {
+          // 直接執行，不要判斷時間，這樣過期的預約也會被排入日曆
+          const date = booking.startTime.split("T")[0];
+          const startTime = booking.startTime.split("T").pop().substring(0, 5);
+          const endTime = booking.endTime.split("T").pop().substring(0, 5);
+          const name = booking.name || "N/A";
+          const purpose = booking.purpose;
+
+          if (!acc[date]) {
+            acc[date] = [];
+          }
+          acc[date].push({ name, startTime, endTime, purpose });
+          return acc;
+        }, {});
+
+        for (let i = 0; i < firstDayOfMonth; i++) {
+          calendarGrid.push(
+            `<div class="p-2 border border-stone-100 bg-stone-50/50"></div>`
+          );
+        }
+
+        for (let day = 1; day <= daysInMonth; day++) {
+          const dateString = `${year}-${String(month + 1).padStart(
+            2,
+            "0"
+          )}-${String(day).padStart(2, "0")}`;
+          const dayBookings = bookedDatesMap[dateString] || [];
+          const isBooked = dayBookings.length > 0;
+          const isToday = dateString === todayDate;
+
+          // --- 核心修正：強化今天 ---
+          const dayClasses = `calendar-day relative p-2 border-2 flex flex-col justify-start items-start text-xs transition-all ${
+            isToday
+              ? "!bg-blue-50 !border-blue-500 font-extrabold shadow-md z-10 scale-[1.03]"
+              : isBooked
+              ? "booked border-stone-200"
+              : "bg-white border-stone-200"
+          } ${isToday ? "text-blue-800" : "text-stone-700"}`;
+
+          let bookingDetailsHtml = "";
+          if (isBooked) {
+            bookingDetailsHtml = `
+              <div class="booking-list-container mt-1 w-full flex flex-col items-start space-y-1">
+                ${dayBookings
+                  .map((booking) => {
+                    // 1. 檢查目的
+                    const isOral = booking.purpose === "口試";
+                    const isDeptMeeting = booking.purpose === "系會議/活動";
+
+                    // 2. 決定顏色類別
+                    let textColorClass = "text-color-booking-text"; // 預設深綠色
+                    if (isOral) {
+                      textColorClass = "bg-blue-700 text-white font-bold"; // 寶藍色 + 加粗
+                    } else if (isDeptMeeting) {
+                      textColorClass = "text-red-800 font-bold"; // 暗紅色 + 加粗
+                    }
+
+                    return `
+                    <div class="w-full text-left">
+                      <span class="font-semibold ${textColorClass} truncate block">${booking.name}</span>
+                                      <span class="text-[10px] ${textColorClass} text-opacity-80">${booking.startTime} ~ ${booking.endTime}</span>
+                    </div>
+                  `;
+                  })
+                  .join("")}
+              </div>
+
+            `;
+          } else {
+            bookingDetailsHtml =
+              '<span class="text-xs text-stone-400 mt-1">無預約</span>';
+          }
+
+          const onclickHandler = isBooked
+            ? `onclick="showBookingDetailsWithAdminCheck('${dateString}T00:00:00')"`
+            : "";
+
+          calendarGrid.push(`
+            <div class="${dayClasses}" ${onclickHandler}>
+              <div class="text-lg leading-none">${day}</div>
+              ${bookingDetailsHtml}
+            </div>
+          `);
+        }
+
+        container.innerHTML = `
+          <div class="flex justify-between items-center mb-4 p-2">
+            <button onclick="changeMonth(-1)" class="p-2 rounded-full text-stone-600 hover:bg-stone-200 transition">
+              <i data-lucide="chevron-left" class="w-6 h-6"></i>
+            </button>
+            <h3 id="current-month-display" class="text-2xl font-bold text-accent">${monthName}</h3>
+            <button onclick="changeMonth(1)" class="p-2 rounded-full text-stone-600 hover:bg-stone-200 transition">
+              <i data-lucide="chevron-right" class="w-6 h-6"></i>
+            </button>
+          </div>
+
+          <div class="grid grid-cols-7 text-center font-semibold text-sm text-stone-500 mb-2">
+            <div>日</div><div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div class="text-red-600">六</div>
+          </div>
+
+          <div class="grid grid-cols-7 gap-1 bg-stone-100/50 p-2 rounded-lg border border-stone-200">
+            ${calendarGrid.join("")}
+          </div>
+
+          <div id="calendar-day-details" class="mt-6 p-4 bg-stone-50 rounded-xl border border-stone-300">
+            <p class="text-stone-500">請點擊日曆中帶有預約的日期，查看該日的排程詳情。</p>
+          </div>
+        `;
+
+        lucide.createIcons();
+      };
+
+      // **renderReviewPanel 函式 (只顯示無待審核請求)**
+      const renderReviewPanel = (bookings) => {
+        const container = document.getElementById("review-requests");
+        if (!container) return;
+
+        // 不論傳入的 bookings 是否為空，都只顯示無待審核訊息
+        container.className = "mt-6";
+
+        container.innerHTML = `
+          <h3 class="text-2xl font-bold mb-4 text-stone-700 flex items-center">
+            <i data-lucide="shield-check" class="w-6 h-6 mr-2 text-green-600"></i>
+            預約狀態
+          </h3>
+          <div class="card p-5 rounded-xl shadow-xl border-green-600/50">
+            <p class="text-stone-700 font-semibold">此系統已取消審核機制，所有預約申請將自動即時通過並顯示在日曆上。</p>
+            <p class="text-stone-500 mt-2">（因此，這裡不再顯示待審核請求。）</p>
+          </div>
+        `;
+        lucide.createIcons();
+      };
+
+      // 渲染管理員設定介面 (修正: 移除公告欄編輯功能)
+      const renderAdminSettings = () => {
+        const container = document.getElementById("admin-settings");
+        if (!container) return;
+
+        const currentSlotsText =
+          allowedSlots.slots.length > 0
+            ? allowedSlots.slots.map((s) => `${s.start}-${s.end}`).join(", ")
+            : "";
+        const currentStartDate = allowedSlots.startDate || "";
+        const currentEndDate = allowedSlots.endDate || "";
+
+        let statusMessage;
+        if (
+          currentStartDate &&
+          currentEndDate &&
+          allowedSlots.slots.length > 0
+        ) {
+          statusMessage = `<p class="text-sm text-stone-600 mb-2">當前排程有效：${currentStartDate} 至 ${currentEndDate}</p>
+              <p class="text-sm text-stone-600 mb-2">每日開放區段：<span class="font-semibold text-accent">${currentSlotsText}</span></p>`;
+        } else if (currentStartDate && currentEndDate) {
+          statusMessage = `<p class="text-sm text-stone-600 mb-2 font-semibold">當前排程有效：${currentStartDate} 至 ${currentEndDate}。 <span class="text-red-500">但未設定每日開放時段 (預設允許所有時間)。</span></p>`;
+        } else {
+          statusMessage = `<p class="text-sm text-red-500 mb-2 font-semibold">當前狀態：未設定年度有效範圍 (預設允許所有時間)。</p>`;
+        }
+
+        container.className =
+          "card p-6 rounded-xl shadow-xl border-red-600/50 mt-6";
+
+        container.innerHTML = `
+            <h3 class="2xl font-bold mb-4 text-stone-700 flex items-center">
+              <i data-lucide="settings" class="w-6 h-6 mr-2 text-red-600"></i>
+              管理員設定 (年度開放排程)
+            </h3>
+            ${statusMessage}
+
+            <div class="mb-4">
+              <h4 class="lg font-bold mb-2 text-stone-700">1. 設定年度有效範圍</h4>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label for="admin-start-date" class="block text-sm font-medium text-stone-600 mb-1">起始日期:</label>
+                  <input type="date" id="admin-start-date" value="${currentStartDate}"
+                      class="w-full p-3 rounded-lg bg-stone-100 border border-stone-300 focus:border-red-600 focus:ring-red-600 text-stone-800 transition">
+                </div>
+                <div>
+                  <label for="admin-end-date" class="block text-sm font-medium text-stone-600 mb-1">截止日期:</label>
+                  <input type="date" id="admin-end-date" value="${currentEndDate}"
+                      class="w-full p-3 rounded-lg bg-stone-100 border border-stone-300 focus:border-red-600 focus:ring-red-600 text-stone-800 transition">
+                </div>
+              </div>
+            </div>
+
+            <div class="mb-4">
+              <h4 class="lg font-bold mb-2 text-stone-700">2. 設定每日開放區段</h4>
+              <p class="sm text-stone-500 mb-2">
+                在這個日期範圍內，每天允許借用的時間區段。格式為 HH:MM-HH:MM，多個區段請用逗號分隔 (例如: 08:00-12:00, 14:00-17:00)。
+              </p>
+              <label for="admin-slots-input" class="block text-sm font-medium text-stone-600 mb-1">開放區段輸入:</label>
+              <input type="text" id="admin-slots-input" value="${currentSlotsText}"
+                    placeholder="例如: 08:00-12:00, 14:00-17:00"
+                    class="w-full p-3 rounded-lg bg-stone-100 border border-stone-300 focus:border-red-600 focus:ring-red-600 text-stone-800 transition">
+            </div>
+
+            <button onclick="saveAllowedSlots()" class="w-full bg-red-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg transition duration-300 shadow-md hover:shadow-lg">
+              <i data-lucide="save" class="w-5 h-5 inline-block align-text-bottom mr-2"></i>
+              儲存年度開放排程
+            </button>
+            <div id="admin-message" class="text-center mt-3 text-stone-700"></div>
+            
+            <div class="mt-8">
+              <h4 class="lg font-bold mb-2 text-stone-700">3. 公告欄內容編輯</h4>
+              <p class="sm text-stone-500 mb-2">管理員可以在這裡發布公共公告，內容將立即顯示在頁面頂部。</p>
+              <div
+                class="mt-4 p-3 bg-stone-100 rounded-lg shadow-inner border border-stone-300"
+              >
+                <textarea
+                  id="public-message-input"
+                  rows="2"
+                  class="w-full p-2 border border-stone-300 rounded-lg text-stone-800 focus:border-accent focus:ring-accent transition"
+                  placeholder="輸入新的公告內容，這將會覆蓋舊的訊息..."
+                ></textarea>
+                <div class="flex justify-between items-center mt-2">
+                  <p id="public-message-status" class="text-xs text-stone-500"></p>
+                  <button
+                    onclick="submitPublicMessage()"
+                    class="bg-red-600 hover:bg-blue-700 text-white font-semibold py-1 px-3 rounded-lg text-sm transition duration-300"
+                  >
+                    發布/更新公告
+                  </button>
+                </div>
+              </div>
+            </div>
+        `;
+        lucide.createIcons();
+      };
+
+      // Tab 切換功能
+      window.switchTab = (tabName) => {
+        const scheduleBtn = document.getElementById("tab-schedule-btn");
+        const adminBtn = document.getElementById("tab-admin-btn");
+        const scheduleContent = document.getElementById(
+          "schedule-content-wrapper"
+        );
+        const adminContent = document.getElementById(
+          "admin-panel-content-wrapper"
+        );
+
+        let targetTab = tabName;
+
+        if (tabName === "admin") {
+          if (currentTab !== "admin" && !isAdminLoggedIn) {
+            const password = prompt("請輸入管理員密碼 (t??x???4)");
+            const correctPassword = "tedx2614";
+
+            if (password === correctPassword) {
+              currentTab = "admin";
+              isAdminLoggedIn = true; // 登入成功
+            } else {
+              alert("密碼錯誤，無法進入管理員介面。");
+              targetTab = "schedule";
+            }
+          } else if (isAdminLoggedIn) {
+            currentTab = "admin"; // 如果已經登入，直接切換到 admin
+          }
+        } else if (tabName === "schedule") {
+          targetTab = "schedule";
+        }
+
+        currentTab = targetTab; // 確保 currentTab 正確更新
+
+        // 更新 Tab 樣式和內容顯示
+        scheduleBtn.classList.toggle("active", targetTab === "schedule");
+        adminBtn.classList.toggle("active", targetTab === "admin");
+
+        scheduleContent.classList.toggle("hidden", targetTab !== "schedule");
+        adminContent.classList.toggle("hidden", targetTab !== "admin");
+
+        // 重新渲染內容
+        if (targetTab === "schedule") {
+          renderAnnualScheduleInfo(); // 切換到排程頁面時，更新年度資訊
+          renderCalendar();
+        } else if (targetTab === "admin") {
+          renderReviewPanel([]); // 確保待審核面板是空的
+          renderAdminSettings();
+        }
+      };
+
+      // Initialize on window load
+      window.onload = () => {
+        const now = new Date();
+        const defaultStart = getNextHalfHour(new Date(now));
+        const defaultEnd = getNextHalfHour(
+          new Date(now.getTime() + 60 * 60 * 1000)
+        );
+
+        document.getElementById("startTime").value = defaultStart;
+        document.getElementById("endTime").value = defaultEnd;
+
+        document
+          .getElementById("isRecurring")
+          .addEventListener("change", function () {
+            document
+              .getElementById("recurrenceOptions")
+              .classList.toggle("hidden", !this.checked);
+          });
+
+        document
+          .getElementById("recurrenceEndType")
+          .addEventListener("change", function () {
+            const isEndDate = this.value === "endDate";
+            document
+              .getElementById("endDateWrapper")
+              .classList.toggle("hidden", !isEndDate);
+            document
+              .getElementById("countWrapper")
+              .classList.toggle("hidden", isEndDate);
+          });
+        document
+          .getElementById("recurrenceEndType")
+          .dispatchEvent(new Event("change"));
+
+        initializeFirebase();
+        setupAuthAndListeners();
+
+        window.switchTab("schedule");
+
+        // --- 職人級補強：跨日自動刷新邏輯 ---
+        // 當使用者切換分頁或喚醒電腦回到此頁面時，觸發重新渲染
+        document.addEventListener("visibilitychange", () => {
+          if (document.visibilityState === "visible") {
+            console.log("偵測到分頁切換，正在更新今日日期標記...");
+            renderCalendar();
+          }
+        });
+        // ----------------------------------
+      };
+    </script>
+  </head>
+  <body class="p-4 sm:p-8">
+    <div class="container mx-auto mb-6">
+      <div
+        class="p-4 rounded-xl shadow-md border-l-4 border-accent bg-yellow-50/70"
+      >
+        <h3 class="text-lg font-bold text-stone-700 flex items-center mb-1">
+          <i data-lucide="message-square" class="w-5 h-5 mr-2 text-accent"></i>
+          [公告]
+        </h3>
+
+        <div
+          id="public-announcement-display"
+          class="mt-3 p-4 bg-red-50 rounded-xl border-2 border-red-200 shadow-sm min-h-[60px] flex items-center"
+        >
+          <p class="text-sm text-stone-500">載入公告內容...</p>
+        </div>
+      </div>
+    </div>
+
+    <header class="text-center mb-10">
+      <h1 class="text-4xl font-extrabold text-secondary tracking-wider">
+        E611會議室預約系統
+      </h1>
+      <p class="text-xl text-stone-700 mt-2">
+        淡江化材系
+        <i data-lucide="atom" class="inline-block w-6 h-6 text-accent"></i>
+      </p>
+      <div class="mt-4 text-xs text-stone-500">
+        您的用戶ID: <span id="user-id-display" class="font-mono"></span>
+      </div>
+    </header>
+
+    <div class="container mx-auto grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div class="lg:col-span-1 p-6 card shadow-xl border-accent">
+        <h2 class="text-2xl font-bold mb-6 text-stone-700 flex items-center">
+          <i data-lucide="flask-conical" class="w-6 h-6 mr-2 text-accent"></i>
+          預約申請
+        </h2>
+        <form id="reservation-form" onsubmit="submitReservation(event)">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+            <div>
+              <label
+                for="name"
+                class="block text-sm font-medium text-stone-600 mb-1"
+                >姓名</label
+              >
+              <input
+                type="text"
+                id="name"
+                name="name"
+                required
+                class="w-full p-3 rounded-lg bg-stone-100 border border-stone-300 focus:border-accent focus:ring-accent text-stone-800 transition"
+              />
+            </div>
+            <div>
+              <label
+                for="advisor"
+                class="block text-sm font-medium text-stone-600 mb-1"
+                >指導教授姓名</label
+              >
+              <input
+                type="text"
+                id="advisor"
+                name="advisor"
+                required
+                class="w-full p-3 rounded-lg bg-stone-100 border border-stone-300 focus:border-accent focus:ring-accent text-stone-800 transition"
+              />
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+            <div>
+              <label
+                for="startTime"
+                class="block text-sm font-medium text-stone-600 mb-1"
+                >開始時間</label
+              >
+              <input
+                type="datetime-local"
+                id="startTime"
+                name="startTime"
+                required
+                class="w-full p-3 rounded-lg bg-stone-100 border border-stone-300 focus:border-accent focus:ring-accent text-stone-800 transition"
+              />
+            </div>
+            <div>
+              <label
+                for="endTime"
+                class="block text-sm font-medium text-stone-600 mb-1"
+                >結束時間</label
+              >
+              <input
+                type="datetime-local"
+                id="endTime"
+                name="endTime"
+                required
+                class="w-full p-3 rounded-lg bg-stone-100 border border-stone-300 focus:border-accent focus:ring-accent text-stone-800 transition"
+              />
+            </div>
+          </div>
+
+          <div class="mb-4 flex items-center">
+            <input
+              type="checkbox"
+              id="isRecurring"
+              name="isRecurring"
+              class="w-4 h-4 text-accent bg-stone-100 border-stone-300 rounded focus:ring-accent"
+            />
+            <label
+              for="isRecurring"
+              class="ml-2 text-sm font-medium text-stone-600"
+              >啟用週期性預約 (每週重複)</label
+            >
+          </div>
+
+          <div
+            id="recurrenceOptions"
+            class="p-4 bg-stone-50 rounded-xl border border-stone-200 hidden mb-6"
+          >
+            <h4
+              class="text-base font-bold text-stone-700 mb-3 flex items-center"
+            >
+              <i data-lucide="repeat" class="w-4 h-4 mr-2 text-accent"></i>
+              週期設定
+            </h4>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label
+                  for="recurrenceEndType"
+                  class="block text-xs font-medium text-stone-600 mb-1"
+                  >週期結束條件</label
+                >
+                <select
+                  id="recurrenceEndType"
+                  name="recurrenceEndType"
+                  class="w-full p-2 rounded-lg bg-white border border-stone-300 text-stone-800"
+                >
+                  <option value="endDate">結束日期</option>
+                  <option value="count">重複次數</option>
+                </select>
+              </div>
+              <div id="endDateWrapper">
+                <label
+                  for="recurrenceEndDate"
+                  class="block text-xs font-medium text-stone-600 mb-1"
+                  >結束日期</label
+                >
+                <input
+                  type="date"
+                  id="recurrenceEndDate"
+                  name="recurrenceEndDate"
+                  class="w-full p-2 rounded-lg bg-white border border-stone-300 text-stone-800"
+                />
+              </div>
+              <div id="countWrapper" class="hidden">
+                <label
+                  for="recurrenceCount"
+                  class="block text-xs font-medium text-stone-600 mb-1"
+                  >重複次數 (含首次)</label
+                >
+                <input
+                  type="number"
+                  id="recurrenceCount"
+                  name="recurrenceCount"
+                  min="1"
+                  value="1"
+                  class="w-full p-2 rounded-lg bg-white border border-stone-300 text-stone-800"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div class="mb-6">
+            <h4 class="block text-sm font-medium text-stone-600 mb-2">
+              使用目的 *
+            </h4>
+            <div
+              class="space-y-2 p-3 bg-stone-100 rounded-lg border border-stone-300"
+            >
+              <label
+                for="purpose-meeting"
+                class="flex items-center text-stone-700 cursor-pointer"
+              >
+                <input
+                  type="radio"
+                  id="purpose-meeting"
+                  name="purpose"
+                  value="實驗室Meeting"
+                  required
+                  class="w-4 h-4 text-accent bg-white border-stone-300 focus:ring-accent"
+                />
+                <span class="ml-2 text-sm">實驗室Meeting</span>
+              </label>
+
+              <label
+                for="purpose-oral"
+                class="flex items-center text-stone-700 cursor-pointer"
+              >
+                <input
+                  type="radio"
+                  id="purpose-oral"
+                  name="purpose"
+                  value="口試"
+                  required
+                  class="w-4 h-4 text-accent bg-white border-stone-300 focus:ring-accent"
+                />
+                <span class="ml-2 text-sm font-bold text-blue-500"
+                  >*口試 (允許時間重疊/優先使用權)</span
+                >
+              </label>
+
+              <label
+                for="purpose-conference"
+                class="flex items-center text-stone-700 cursor-pointer"
+              >
+                <input
+                  type="radio"
+                  id="purpose-conference"
+                  name="purpose"
+                  value="系會議/活動"
+                  required
+                  class="w-4 h-4 text-accent bg-white border-stone-300 focus:ring-accent"
+                />
+                <span class="ml-2 text-sm font-bold text-red-700"
+                  >*系會議/活動 (允許時間重疊/優先使用權)</span
+                >
+              </label>
+
+              <label
+                for="purpose-other"
+                class="flex items-center text-stone-700 cursor-pointer"
+              >
+                <input
+                  type="radio"
+                  id="purpose-other"
+                  name="purpose"
+                  value="其他"
+                  required
+                  class="w-4 h-4 text-accent bg-white border-stone-300 focus:ring-accent"
+                />
+                <span class="ml-2 text-sm">其他</span>
+              </label>
+            </div>
+          </div>
+
+          <button
+            type="submit"
+            class="w-full btn-primary py-3 rounded-xl shadow-md hover:shadow-lg transition duration-300"
+          >
+            <i
+              data-lucide="send"
+              class="w-5 h-5 inline-block align-text-bottom mr-2"
+            ></i>
+            送出預約 (即時生效)
+          </button>
+          <div
+            id="reservation-message"
+            class="text-center mt-3 text-stone-700"
+          ></div>
+        </form>
+      </div>
+
+      <div class="lg:col-span-2">
+        <div
+          class="flex border-b border-stone-200 bg-white rounded-t-xl shadow-md overflow-hidden"
+        >
+          <div
+            id="tab-schedule-btn"
+            class="tab-button w-1/2"
+            onclick="switchTab('schedule')"
+          >
+            <i
+              data-lucide="calendar-check"
+              class="w-5 h-5 inline-block align-text-bottom mr-2"
+            ></i>
+            使用日曆
+          </div>
+          <div
+            id="tab-admin-btn"
+            class="tab-button w-1/2"
+            onclick="switchTab('admin')"
+          >
+            <i
+              data-lucide="user-cog"
+              class="w-5 h-5 inline-block align-text-bottom mr-2"
+            ></i>
+            管理員 (設定 & 刪除)
+          </div>
+        </div>
+
+        <div
+          class="bg-white p-6 rounded-b-xl shadow-lg border-t-0 border-stone-200"
+        >
+          <div id="schedule-content-wrapper" class="space-y-4">
+            <h2
+              class="text-2xl font-bold mb-4 text-stone-700 flex items-center"
+            >
+              <i data-lucide="calendar" class="w-6 h-6 mr-2 text-accent"></i>
+              E611日曆 (點擊日期查看詳情)
+            </h2>
+
+            <div id="annual-schedule-info" class="mb-4">
+              <div class="text-sm text-stone-500 p-2 text-center">
+                正在載入年度排程資訊...
+              </div>
+            </div>
+
+            <div id="approved-schedule">
+              <div
+                class="p-6 text-center text-stone-500 bg-stone-50 rounded-xl shadow-inner border border-stone-200"
+              >
+                載入中...
+              </div>
+            </div>
+          </div>
+
+          <div id="admin-panel-content-wrapper" class="hidden">
+            <h2
+              class="text-2xl font-bold mb-6 text-stone-700 flex items-center"
+            >
+              <i
+                data-lucide="shield-half"
+                class="w-6 h-6 mr-2 text-red-600"
+              ></i>
+              管理員操作區
+            </h2>
+
+            <div id="review-requests"></div>
+            <div id="admin-settings">
+              <div
+                class="p-6 text-center text-stone-500 bg-white rounded-xl shadow-inner border border-red-200"
+              >
+                載入設定面板...
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
